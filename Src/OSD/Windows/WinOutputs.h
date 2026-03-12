@@ -25,8 +25,25 @@
  * Implementation of COutputs that sends MAMEHooker compatible messages via Windows messages.
  */
 
+
+
 #ifndef INCLUDED_WINOUTPUTS_H
 #define INCLUDED_WINOUTPUTS_H
+
+#define IPADDR			"127.0.0.1"
+#define PORT			8000
+#define CONNECTTRIES	50
+
+#include "OSD/Logger.h"
+#include <stdio.h>
+
+//string and SDL for Network Output
+#include <string>
+#include "SDLIncludes.h"
+
+#include <chrono>
+#include <thread>
+#include <iostream>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -114,6 +131,13 @@ private:
 	UINT m_getIdString;
 
 	vector<RegisteredClient> m_clients;
+	
+	//Network Vars
+	std::string	m_ip = IPADDR;
+	int			m_port = PORT;
+	TCPsocket	m_socket;
+	TCPsocket	m_client;
+	
 
 	/*
 	 * AllocateMessageId(regId, str):
