@@ -33,6 +33,7 @@
 #define OUTPUT_WINDOW_CLASS	TEXT("MAMEOutput")
 #define OUTPUT_WINDOW_NAME	TEXT("MAMEOutput")
 
+
 // Messages sent from emulator to external clients
 #define START        TEXT("MAMEOutputStart")
 #define STOP		 TEXT("MAMEOutputStop")
@@ -46,6 +47,10 @@
 #define COPYDATA_MESSAGE_ID_STRING 1
 
 bool CWinOutputs::s_createdClass = false;
+
+#define OUTPUT_WINDOW_CLASSTCP	TEXT("MAMEOutputTCP")
+#define OUTPUT_WINDOW_NAMETCP	TEXT("MAMEOutputTCP")
+
 
 CWinOutputs::CWinOutputs() : m_hwnd(NULL)
 {
@@ -73,9 +78,9 @@ CWinOutputs::~CWinOutputs()
 	{
 		SDLNet_TCP_Close(m_socket);
 		m_socket = nullptr;
+		
+		SDLNet_Quit();
 	}
-
-	SDLNet_Quit();
 	
 	// Broadcast a shutdown message
 	if (m_hwnd)
@@ -154,12 +159,29 @@ bool CWinOutputs::Initialize()
 					countTry++;
 					std::this_thread::sleep_for(std::chrono::milliseconds(20));
 				}
-
+				
+				if(m_client != 0)
+				{	
+					m_hwndTCP = CreateWindowEx(0,
+							OUTPUT_WINDOW_CLASSTCP,
+							OUTPUT_WINDOW_NAMETCP,
+							WS_OVERLAPPEDWINDOW,
+							0, 0,
+							1, 1,
+							NULL,
+							NULL,
+							GetModuleHandle(NULL),
+							NULL);
+							
+					m_idTCP = 6969;
+					
+				}
 			}
 		}
 		else
 		{
 			printf("SDLNet_ResolveHost Failed- Error: %s\n", SDLNet_GetError());
+			SDLNet_Quit();
 		}
 	}
 	
@@ -170,38 +192,46 @@ void CWinOutputs::Attached()
 {
 	// Broadcast a startup message
 	PostMessage(HWND_BROADCAST, m_onStart, (WPARAM)m_hwnd, 0);
+	
+	if(m_client != 0)
+		RegisterClient(m_hwndTCP, m_idTCP);
 }
 
 void CWinOutputs::SendOutput(EOutputs output, UINT8 prevValue, UINT8 value)
 {
 	//printf("LAMP OUTPUT %s = %u -> %u\n", GetOutputName(output), prevValue, value);
 
-	std::string outputSig(GetOutputName(output));
-	std::string valueString = std::to_string(value);
-	std::string message = outputSig + " = " + valueString + "\n";
-
-	//Network - Send Data Out if Socket and Client are Good
-	if(m_socket != 0 && m_client != 0)
-	{
-		int length = message.size();
-		int bytesSent = SDLNet_TCP_Send(m_client, (void*)message.c_str(), length);
-
-		if (bytesSent < length)
-		{
-			printf("Closing TCP Socket");
-			SDLNet_TCP_Close(m_socket);
-			m_socket = nullptr;
-		}
-	}
-	else
-	{
-		printf("m_client error: 0\n");
-	}
-
 	// Loop through all registered clients and send them new output value
 	LPARAM param = (LPARAM)output + 1;
 	for (vector<RegisteredClient>::iterator it = m_clients.begin(), end = m_clients.end(); it != end; ++it)
-		PostMessage(it->hwnd, m_updateState, param, value);
+	{
+		if(it->hwnd == m_hwndTCP && it->id == m_idTCP)
+		{
+			std::string outputSig(GetOutputName(output));
+			std::string valueString = std::to_string(value);
+			std::string message = outputSig + " = " + valueString + "\n";
+
+			//Network - Send Data Out if Socket and Client are Good
+			if(m_socket != 0 && m_client != 0)
+			{
+				int length = message.size();
+				int bytesSent = SDLNet_TCP_Send(m_client, (void*)message.c_str(), length);
+
+				if (bytesSent < length)
+				{
+					printf("Closing TCP Socket\n");
+					SDLNet_TCP_Close(m_socket);
+					m_socket = nullptr;
+				}
+			}
+			else
+			{
+				printf("m_client error: 0\n");
+			}	
+		}
+		else
+			PostMessage(it->hwnd, m_updateState, param, value);
+	}
 }
 
 LRESULT CALLBACK CWinOutputs::OutputWindowProcCallback(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -296,7 +326,46 @@ void CWinOutputs::SendAllToClient(RegisteredClient &client)
 	{
 		EOutputs output = (EOutputs)i;
 		LPARAM param = (LPARAM)output + 1;
-		PostMessage(client.hwnd, m_updateState, param, GetValue(output));
+		
+		if(client.id == m_idTCP && client.hwnd == m_hwndTCP)
+		{
+			if(m_socket != 0 && m_client != 0)
+			{
+				std::string message;
+				int lengthGM = 100;
+				int bytesSentGM = 100;
+				
+				if(i == 0)
+				{
+					std::string name = GetGame().name;
+					std::string mesGM = "mame_start = " + name + "\n";
+					
+					lengthGM = mesGM.size();
+					bytesSentGM = SDLNet_TCP_Send(m_client, (void*)mesGM.c_str(), lengthGM);
+				}
+				
+				if(bytesSentGM >= lengthGM)
+				{
+					std::string outputSig(GetOutputName(output));
+					std::string valueString = std::to_string(GetValue(output));
+					message = outputSig + " = " + valueString + "\n";
+				
+					//Network - Send Data Out if Socket and Client are Good
+					int length = message.size();
+					int bytesSent = SDLNet_TCP_Send(m_client, (void*)message.c_str(), length);
+		
+					if (bytesSent < length)
+					{
+						printf("Closing TCP Socket");
+						SDLNet_TCP_Close(m_socket);
+						m_socket = nullptr;
+					}
+				}
+			}
+		}
+		else
+			PostMessage(client.hwnd, m_updateState, param, GetValue(output));
+		
 	}
 }
 
@@ -344,6 +413,7 @@ LRESULT CWinOutputs::SendIdString(HWND hwnd, LPARAM id)
 	copyData.lpData = data;
 	SendMessage(hwnd, WM_COPYDATA, (WPARAM)m_hwnd, (LPARAM)&copyData);
 
+	/*
 	//Send Out the Game
 	std::string message;
 	if(id == 0)
@@ -363,6 +433,8 @@ LRESULT CWinOutputs::SendIdString(HWND hwnd, LPARAM id)
 		int length = message.size();
 		int bytesSent = SDLNet_TCP_Send(m_client, (void*)message.c_str(), length);
 		
+		printf("SendIDString is: %s\n", message.c_str()); 
+		
 		if (bytesSent < length)
 		{
 			printf("Closing TCP Socket");
@@ -374,7 +446,7 @@ LRESULT CWinOutputs::SendIdString(HWND hwnd, LPARAM id)
 	{
 		printf("m_client error: 0\n");
 	}
-	
+	*/
 	
 
 	delete[] data;

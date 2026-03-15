@@ -32,7 +32,7 @@
 
 #define IPADDR			"127.0.0.1"
 #define PORT			8000
-#define CONNECTTRIES	50
+#define CONNECTTRIES	100
 
 #include "OSD/Logger.h"
 #include <stdio.h>
@@ -137,6 +137,9 @@ private:
 	int			m_port = PORT;
 	TCPsocket	m_socket;
 	TCPsocket	m_client;
+	HWND		m_hwndTCP;
+	LPARAM		m_idTCP;
+	
 	
 
 	/*
